@@ -2,6 +2,9 @@ library(gRim)
 library(gRbase)
 
 #You might need bioconductior to install 'RBGL'
+source("https://bioconductor.org/biocLite.R")
+biocLite("RBGL")
+
 library(RBGL)
 
 library(mvtnorm)
