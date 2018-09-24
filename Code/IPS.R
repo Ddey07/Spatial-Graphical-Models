@@ -1,7 +1,8 @@
 library(gRim)
 library(gRbase)
+library(RandomFields)
 
-#You might need bioconductior to install 'RBGL'
+#You might need bioconductor to install 'RBGL'
 source("https://bioconductor.org/biocLite.R")
 biocLite("RBGL")
 
@@ -37,4 +38,6 @@ Rhat <- solve(carcfit2$K)
 #R=Rhat on a clique 
 Rhat[cgens[[24]],cgens[[24]]]
 R[cgens[[24]],cgens[[24]]]
+
+
 
