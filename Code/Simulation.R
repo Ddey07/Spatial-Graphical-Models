@@ -73,36 +73,28 @@ for(i in 1:ncol(z)){
 ######Trying one dimension to check the error##########
 sigma.sq <- 1
 phi <- 1
-tau.sq <- 0
-mu <- 1
 
-model <- RMparswmX(nudiag=0.5, rho=1) 
+#model <- RMparswmX(nudiag=0.5, rho=1) 
 model <- RMmatern(nu=0.5)
 
-#set.seed(10)
-#n <- 200
-#coords <- cbind(runif(n,0,1),runif(n,0,1))
+n <- 1000
+
 #Setting up grid
-coords <- cbind(seq(0,1,length.out = 20), seq(0,1,length.out = 20))
+coords <- cbind(seq(0,10,length.out = n), seq(0,10,length.out = n))
 
-#Setting nugget variance to be 0
-tau.sq <- 0
-w <- RFsimulate(model = model, x=coords[,1], y=coords[,2]) 
-##Setting mean to be 1
-e <- matrix(rnorm(ncol(w)*nrow(w),mu,sd=sqrt(tau.sq)),ncol=ncol(w))
+###simulating using multivariate normal function
+R <- exp(-phi*as.matrix(dist(coords)))
+w <- rmvnorm(1, mean=rep(0,n), sigma=sigma.sq*R)
 
-z <- w@data + e
-# 
+
 #estimating marginal Materns with likfit
-M <- list()
-for(i in 1:ncol(z)){
-M[[i]] <- likfit(coords=coordinates(w), data=z[,i], cov.model = "matern", fix.kappa=FALSE,ini = c(1.3, 3), fix.nugget = TRUE, nugget=tau.sq)
-}
+fit.lik <- likfit(coords=coords, data=w, cov.model = "exponential", fix.kappa = FALSE, ini.cov.pars=c(1,1))
+fit.BRISC <- BRISC_estimation(coords, x=as.matrix(rep(1,length(w))), y=w)
 
-### Estimating marginal materns wth
-M <- list()
-for(i in 1:ncol(z)){
-  M[[i]] <- BRISC_estimation(coordinates(w), x=as.matrix(rep(1,length(z[,i]))), y=z[,i])
-}
+#Simulating using RandomFields
+w <- RFsimulate(model=model, distance=dist(coords))
 
+fit.lik <- likfit(coords=coords, data=w, cov.model = "matern", fix.kappa = FALSE, ini.cov.pars=c(1,1))
+
+fit.BRISC <- BRISC_estimation(coords, x=as.matrix(rep(1,length(w))), y=w)
 
