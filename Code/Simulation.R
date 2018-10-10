@@ -103,9 +103,9 @@ fit.BRISC <- BRISC_estimation(coords, x=as.matrix(rep(1,length(w))), y=w)
 
 ########## Simulation from Apanasovich paper corollary 3 #########
 p=3
-n=100
+n=200
 
-set.seed(100)
+set.seed(10)
 coords <- cbind(sort(runif(n,0,1)),sort(runif(n,0,1)))
 
 nu.mat = matrix(0.5, ncol=p, nrow= p)
@@ -149,17 +149,17 @@ for (i in 1:p){
 }
 
 #####Simulating multivariate normal
-Y <- rmvnorm(1, mean=rep(0,n*p), sigma=SIGMA) 
+Y <- rmvnorm(100, mean=rep(0,n*p), sigma=SIGMA) 
 
 Y <- Y +1
 ###Creating n*p data matrix
-Y.data <- matrix(Y, ncol=p)
+Y.data <- matrix(Y[10,], ncol=p)
 
 
 ### Estimating marginal materns with BRISC
 M <- list()
 for(i in 1:ncol(Y.data)){
-  M[[i]] <- BRISC_estimation(coords, x=as.matrix(rep(1,length(Y.data[,i]))), y=Y.data[,i], n.neighbors = 20, cov.model="exponential")
+  M[[i]] <- BRISC_estimation(coords, x=as.matrix(rep(1,length(Y.data[,i]))), y=Y.data[,i], n.neighbors = 30, cov.model="exponential")
 }
 
 nuhat.mat = matrix(0.5, ncol=p, nrow= p)
@@ -205,8 +205,8 @@ for (i in 1:p){
 A <- matrix(0,nrow=n*p,ncol=n*p)
 for(i in (1:(n*p-1))){
   for(j in ((i+1): (n*p))){
-    j.q <- j %/% n
-    i.q <- i %/% n
+    j.q <- (j-1) %/% n
+    i.q <- (i-1) %/% n
     if((j-i) %% n ==0 | ((j-i) < n & (j.q-i.q)==0)){
       A[i,j]=1
       A[j,i]=A[i,j]
@@ -222,7 +222,7 @@ colnames(SIGMAhat) <- c(1:(n*p))
 rownames(SIGMAhat) <- c(1:(n*p))
 
 T1 <- Sys.time()
-carcfit2 <- ggmfit(SIGMAhat, n=100, cgens)
+carcfit2 <- ggmfit(SIGMAhat, n=1, cgens)
 Sys.time() - T1
 
 #Estimated covariance matrix
