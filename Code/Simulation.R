@@ -27,7 +27,7 @@ ellK <- function (K, S, n)
 
 
 
-ggmfitr.edit <- function (S, n.obs, glist, start = NULL, eps = 1e-12, iter = 1000, 
+ggmfitr.edit <- function (S, n.obs, Y, glist, start = NULL, eps = 1e-12, iter = 1000, 
                           details = 0, ...) 
 {
   if (is.null(start)) {
@@ -78,7 +78,7 @@ ggmfitr.edit <- function (S, n.obs, glist, start = NULL, eps = 1e-12, iter = 100
   df <- sum(K[upper.tri(K)] == 0)
   ans <- list(dev = -2 * logL, df = df, logL = logL, K = K, 
               S = S, n.obs = n.obs, itcount = itcount, converged = converged, 
-              logLvec = logLvec)
+              logLvec = logLvec, logLtest=ellK(K,cov(Y),n=nrow(Y)))
   return(ans)
 }
 
@@ -169,7 +169,7 @@ T0 <- Sys.time()
 p=3
 n=200
 
-set.seed(10)
+set.seed(20)
 coords <- cbind(sort(runif(n,0,1)),sort(runif(n,0,1)))
 
 nu.mat = matrix(0.5, ncol=p, nrow= p)
@@ -184,10 +184,10 @@ for(i in 1:(p-1)){
 }
 
 ##Creating smoothness matrix
-sigma.diag=runif(p,0.2,2)
+sigma.diag=runif(p,5,50)
 sigma.mat=diag(sigma.diag)
 
-R_V=matrix(nc=p, c(1, 0.5, 0.2, 0.5, 1, 0.6, 0.2, 0.6, 1))
+R_V=matrix(nc=p, c(1, -0.5, 0.2, -0.5, 1, 0.6, 0.2, 0.6, 1))
 
 for(i in 1:(p-1)){
   for (j in (i+1): p){
@@ -257,6 +257,8 @@ for(i in 1:(p-1)){
 }
 
 SIGMAhat <- matrix(ncol=n*p, nrow=n*p)
+colnames(SIGMAhat) <- c(1:(n*p))
+rownames(SIGMAhat) <- c(1:(n*p))
 
 for (i in 1:p){
   for(j in i:p){
@@ -291,12 +293,12 @@ cgens <- maxClique(as(A,"graphNEL"))$maxCliques
 T1 <- Sys.time()
 
 T2 <- T1-T0
-carcfit2 <- ggmfitr.edit(SIGMAhat, n=1, glist=cgens, eps=10^(-3))
+carcfit2 <- ggmfitr.edit(SIGMAhat, n=1, glist=cgens, eps=10^(-3), Y=Y[1:50])
 elapsed <- Sys.time() - T1
 
 # #Estimated covariance matrix
 Rhat <- solve(carcfit2$K)
-return(list(fit=carcfit2,lik=carcfit2$logL,sigma=Rhat))
+return(list(fit=carcfit2,lik=carcfit2$logLtest,sigma=Rhat))
 } else{
   return(list(fit=NULL,lik=NULL,sigma=NULL))
 }
@@ -329,8 +331,9 @@ Y.pred <- matrix(NA,ncol=ncol(Y.test),nrow=nrow(Y.test))
 
 for(i in sample(1:200,25)){
   for(j in c(1:3)){
-    Y.pred[i,j]=pred.matern(loc=i,var=j,sigma=SIGMAhat)
+    Y.pred[i,j]=pred.matern(loc=i,var=j,sigma=SIGMAhat, train=Y[3,])
   }
 }
 
+mean((Y.test-Y.pred)^2, na.rm=TRUE)
 
