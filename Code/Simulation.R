@@ -1,6 +1,6 @@
 rm(list=ls())
 
-library(gRim)
+#library(gRim)
 library(gRbase)
 library(RandomFields)
 
@@ -18,6 +18,70 @@ library(geoR)
 if (!require("devtools")) install.packages("devtools")
 #devtools::install_github("ArkajyotiSaha/BRISC")
 library(BRISC)
+
+ellK <- function (K, S, n) 
+{
+  value <- (n/2) * (sum(log(eigen(K)$values)) - sum(rowSums(K * S)))
+  return(value)
+}
+
+
+
+ggmfitr.edit <- function (S, n.obs, glist, start = NULL, eps = 1e-12, iter = 1000, 
+                          details = 0, ...) 
+{
+  if (is.null(start)) {
+    K <- diag(1/diag(S))
+  }
+  else {
+    K <- start
+  }
+  dimnames(K) <- dimnames(S)
+  vn <- colnames(S)
+  x <- lapply(glist, match, vn)
+  varIndex = 1:nrow(K)
+  itcount = 0
+  if (length(x)) {
+    my.complement <- function(C) return(setdiff(varIndex, 
+                                                C))
+    x.complements <- lapply(x, my.complement)
+    if (length(x.complements[[1]]) == 0) {
+      return(list(K = solve(S)))
+    }
+    logLvec <- NULL
+    repeat {
+      for (j in 1:length(x)) {
+        C <- x[[j]]
+        notC <- x.complements[[j]]
+        K[C, C] <- solve(S[C, C, drop = FALSE]) + K[C, 
+                                                    notC, drop = FALSE] %*% solve(K[notC, notC, 
+                                                                                    drop = FALSE]) %*% K[notC, C, drop = FALSE]
+      }
+      logL <- ellK(K, S, n.obs)
+      logLvec <- c(logLvec, logL)
+      itcount <- itcount + 1
+      if (itcount > 1) {
+        if (logL - prevlogL < eps) {
+          converged = TRUE
+          break
+        }
+      }
+      else {
+        if (itcount == iter) {
+          converged = FALSE
+          break
+        }
+      }
+      prevlogL <- logL
+    }
+  }
+  df <- sum(K[upper.tri(K)] == 0)
+  ans <- list(dev = -2 * logL, df = df, logL = logL, K = K, 
+              S = S, n.obs = n.obs, itcount = itcount, converged = converged, 
+              logLvec = logLvec)
+  return(ans)
+}
+
 
 T0 <- Sys.time()
 # ##### Simulating from multivariate Matern model
@@ -177,11 +241,14 @@ for(i in 1:(p-1)){
 sigmahat.diag=c(M[[1]]$Theta[1],M[[2]]$Theta[1], M[[3]]$Theta[1])
 sigmahat.mat=diag(sigmahat.diag)
 
+colnames(SIGMA) <- c(1:(n*p))
+rownames(SIGMA) <- c(1:(n*p))
+
+
 ##taking an initial rho to get initial Sigma
 
-rho = 0.04
+pseudo.est <- function(rho){
 R_V= (1-rho)*diag(p) + rho*cor(Y.data)
-
 for(i in 1:(p-1)){
   for (j in (i+1): p){
     sigmahat.mat[i,j]= sqrt(sigmahat.mat[i,i] * sigmahat.mat[j,j]) * R_V[i,j] 
@@ -195,12 +262,12 @@ for (i in 1:p){
   for(j in i:p){
     idx=c(((i-1)*n+1):(i*n))
     jdx=c(((j-1)*n+1):(j*n))
-    
     SIGMAhat[idx,jdx] = sigmahat.mat[i,j]*geoR::matern(D,phi= 1/phihat.mat[i,j], kappa= nuhat.mat[i,j])
     SIGMAhat[jdx,idx] = SIGMAhat[idx,jdx]
   }
 }
 
+if(is.positive.semi.definite(SIGMAhat)){
 #### Creating the adjacency matrix for conditional independency structure (graph) #######
 A <- matrix(0,nrow=n*p,ncol=n*p)
 for(i in (1:(n*p-1))){
@@ -218,27 +285,52 @@ for(i in (1:(n*p-1))){
 #finding maximal cliques
 cgens <- maxClique(as(A,"graphNEL"))$maxCliques
 
-colnames(SIGMAhat) <- c(1:(n*p))
-rownames(SIGMAhat) <- c(1:(n*p))
 
-save(SIGMAhat,file="Sigmahat.RData")
+#save(SIGMAhat,file="Sigmahat.RData")
 
 T1 <- Sys.time()
 
 T2 <- T1-T0
-carcfit2 <- ggmfit(SIGMAhat, n=1, cgens)
+carcfit2 <- ggmfitr.edit(SIGMAhat, n=1, glist=cgens, eps=10^(-3))
 elapsed <- Sys.time() - T1
 
 # #Estimated covariance matrix
-# #Rhat <- solve(carcfit2$K)
-#
-# # #R=Rhat on a clique
-# # Rhat[cgens[[24]],cgens[[24]]]
-# # R[cgens[[24]],cgens[[24]]]
-#
+Rhat <- solve(carcfit2$K)
+return(list(fit=carcfit2,lik=carcfit2$logL,sigma=Rhat))
+} else{
+  return(list(fit=NULL,lik=NULL,sigma=NULL))
+}
+}
 
-save(carcfit2, file="fit_ips.RData")
-save.image("all.RData")
+rho.seq <- seq(-1,1,len=2)
+  
+results <- list()
 
-quit("no")
+for(i in 1:length(rho.seq)){
+  results[[i]] <- pseudo.est(rho.seq[i])
+}
+
+save.image("all2.RData")
+
+
+pred.matern <- function(loc=1,var=2, sigma, mean=1,train=Y[10,], n.var=3){
+  n <- ncol(sigma)/n.var
+  p <- n.var
+  t <- (var-1)*n + loc
+  
+  cond.sigma <- (sigma[,t][-t]) %*% solve(sigma[-t,-t])
+  pred <- mean + cond.sigma %*% (train[-t]-rep(mean,n*p-1))
+  return(as.numeric(pred))
+}
+
+Y.t <- Y[3,]
+Y.test<- matrix(Y[3,],ncol=p)
+Y.pred <- matrix(NA,ncol=ncol(Y.test),nrow=nrow(Y.test))
+
+for(i in sample(1:200,25)){
+  for(j in c(1:3)){
+    Y.pred[i,j]=pred.matern(loc=i,var=j,sigma=SIGMAhat)
+  }
+}
+
 
