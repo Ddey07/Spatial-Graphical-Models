@@ -26,7 +26,7 @@ ellK <- function (K, S, n)
 
 
 
-ggmfitr.edit <- function (S, n.obs, Y, glist, start = NULL, eps = 1e-12, iter = 1000, 
+ggmfitr.edit <- function (S, n.obs, Y, glist, start = NULL,mu, eps = 1e-12, iter = 1000, 
                           details = 0, ...) 
 {
   if (is.null(start)) {
@@ -76,7 +76,7 @@ ggmfitr.edit <- function (S, n.obs, Y, glist, start = NULL, eps = 1e-12, iter = 
   }
   df <- sum(K[upper.tri(K)] == 0)
   Y <- as.matrix(Y)
-  S_Y = (Y-mean(Y)) %*% t(Y-mean(Y))
+  S_Y = (Y-mu) %*% t(Y-mu)
   ans <- list(dev = -2 * logL, df = df, logL = logL, K = K, 
               S = S, n.obs = n.obs, itcount = itcount, converged = converged, 
               logLvec = logLvec, logLtest=ellK(K=K,S=S_Y,n=ncol(Y)))
@@ -89,22 +89,29 @@ T0 <- Sys.time()
 id <- as.numeric(Sys.getenv("SGE_TASK_ID"))
 
 seed <- seq(2,100,len=50)
-phi.lo <- c(0.1,0.7)
-phi.hi <- c(5,7)
+sigma.phi <- c(1,2)
+n.opt <- c(250,60)
 rho.seq <- seq(0,1,len=50)
 
-setting  <- expand.grid(rho=rho.seq,seed=seed,phi.lo=phi.lo,phi.hi=phi.hi)
+setting  <- expand.grid(rho=rho.seq,seed=seed,sigma.phi=sigma.phi,n.opt=n.opt)
 
 ########## Simulation from Apanasovich paper corollary 3 #########
 p=3
-n=250
+n=setting$n.opt[id]
 test.prop = 0.2
 
 set.seed(setting$seed[id])
 coords <- cbind(sort(runif(n,0,1)),sort(runif(n,0,1)))
 
 nu.mat = matrix(0.5, ncol=p, nrow= p)
-phi.diag= seq(setting$phi.lo[id],setting$phi.hi[id],len=p)
+if(setting$sigma.phi[id]==1){
+  phi.diag= c(3,3,3)
+  sigma.diag=c(1,1,1)
+} else {
+  phi.diag= c(1,3,5)
+  sigma.diag=c(1,3,5)
+}
+
 phi.mat = diag(phi.diag)
 ###Creating phi matrix
 for(i in 1:(p-1)){
@@ -115,7 +122,6 @@ for(i in 1:(p-1)){
 }
 
 ##Creating smoothness matrix
-sigma.diag=c(3*(1:p))
 sigma.mat=diag(sigma.diag)
 
 R_V=matrix(nc=p, c(1, -0.5, 0.2, -0.5, 1, 0.6, 0.2, 0.6, 1))
@@ -151,7 +157,7 @@ Y <- Y +1
 Y.data <- matrix(Y[10,], ncol=p)
 
 ####resetting seed so that for a particular rho, we take same test locations
-set.seed(12345+setting$phi.lo[id] + setting$phi.hi[id])
+set.seed(12345+setting$sigma.phi)
 test.sample <- sample(1:n,size=n*test.prop)
 
 ### Splitting into train test
@@ -184,9 +190,175 @@ for(i in 1:(p-1)){
 sigmahat.diag=c(M[[1]]$Theta[1],M[[2]]$Theta[1], M[[3]]$Theta[1])
 sigmahat.mat=diag(sigmahat.diag)
 
+
+SIGMA.create <- function(theta,phihat, sigmahat,Distance,Y){
+  
+  p <- length(phihat)
+  n <- length(Y)/p
+  d <- 2
+  D_B= theta[1]
+  r_B= diag(p)
+  r_B[r_B==0]=theta[2]
+  r_V= diag(p)
+  r_V[upper.tri(r_V)] <- theta[3:(2+(p*(p-1))/2)]
+  r_V[lower.tri(r_V)] = t(r_V)[lower.tri(r_V)]
+  phi.mat = diag(phihat)
+  ###Creating phi matrix
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      phi.mat[i,j]= sqrt((phi.mat[i,i]^2 + phi.mat[j,j]^2)/2) + D_B*(1-r_B[i,j])
+      phi.mat[j,i] = phi.mat[i,j]
+    }
+  }
+  nu.mat=matrix(nc=p,nr=p,0.5)
+  W = sqrt((sigmahat * phihat^(2*diag(nu.mat)))/(gamma(diag(nu.mat))))
+  ##Creating smoothness matrix
+  sigma.mat=diag(sigmahat)
+  
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      sigma.mat[i,j]= W[i]*W[j] * r_V[i,j] * phi.mat[i,j] ^(-(nu.mat[i,i] + nu.mat[j,j])) * gamma((nu.mat[i,i] + nu.mat[j,j])/2 + d/2) * gamma(nu.mat[i,j]) * 1/(gamma(nu.mat[i,j] + d/2)) 
+      sigma.mat[j,i] = sigma.mat[i,j]
+    }
+  }
+  
+  SIGMA <- matrix(ncol=n*p, nrow=n*p)
+  
+  for (i in 1:p){
+    for(j in i:p){
+      idx=c(((i-1)*n+1):(i*n))
+      jdx=c(((j-1)*n+1):(j*n))
+      
+      SIGMA[idx,jdx] = sigma.mat[i,j]*geoR::matern(Distance,phi= 1/phi.mat[i,j], kappa= nu.mat[i,j])
+      SIGMA[jdx,idx] = SIGMA[idx,jdx]
+    }
+  }
+  
+  return(list(phihat=phi.mat,sigmahat=sigma.mat,sigma=SIGMA))
+  
+}
+
+
+###### Apanasovich algorithm for data with 3 variables #########
+lik <- function(theta, phihat, sigmahat, Y, Distance, mu){
+  p <- length(phihat)
+  n <- length(Y)/p
+  d <- 2
+  D_B= theta[1]
+  r_B= diag(p)
+  r_B[r_B==0]=theta[2]
+  r_V= diag(p)
+  r_V[upper.tri(r_V)] <- theta[3:(2+(p*(p-1))/2)]
+  r_V[lower.tri(r_V)] = t(r_V)[lower.tri(r_V)]
+  phi.mat = diag(phihat)
+  ###Creating phi matrix
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      phi.mat[i,j]= sqrt((phi.mat[i,i]^2 + phi.mat[j,j]^2)/2) + D_B*(1-r_B[i,j])
+      phi.mat[j,i] = phi.mat[i,j]
+    }
+  }
+  nu.mat=matrix(nc=p,nr=p,0.5)
+  W = sqrt((sigmahat * phihat^(2*diag(nu.mat)))/(gamma(diag(nu.mat))))
+  ##Creating smoothness matrix
+  sigma.mat=diag(sigmahat)
+  
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      sigma.mat[i,j]= W[i]*W[j] * r_V[i,j] * phi.mat[i,j] ^(-(nu.mat[i,i] + nu.mat[j,j])) * gamma((nu.mat[i,i] + nu.mat[j,j])/2 + d/2) * gamma(nu.mat[i,j]) * 1/(gamma(nu.mat[i,j] + d/2)) 
+      sigma.mat[j,i] = sigma.mat[i,j]
+    }
+  }
+  
+  SIGMA <- matrix(ncol=n*p, nrow=n*p)
+  
+  for (i in 1:p){
+    for(j in i:p){
+      idx=c(((i-1)*n+1):(i*n))
+      jdx=c(((j-1)*n+1):(j*n))
+      
+      SIGMA[idx,jdx] = sigma.mat[i,j]*geoR::matern(Distance,phi= 1/phi.mat[i,j], kappa= nu.mat[i,j])
+      SIGMA[jdx,idx] = SIGMA[idx,jdx]
+    }
+  }
+  #SIGMA <- SIGMA.create(theta,phihat, sigmahat,Distance,Y)
+  Y <- as.matrix(Y)
+  mu0 <- rep(mu,each=n)
+  S_Y = (Y-mu0) %*% t(Y-mu0)
+  K <- solve(SIGMA)
+  #loglik <- -ellK(S=S_Y,K=K,n=1)
+  loglik <- ifelse(is.positive.semi.definite(SIGMA),-log(dmvnorm(Y[,1],mean=mu0,sigma=SIGMA)),1000)
+  return(loglik)
+}
+
+### model with r_V equicorrelated
+
+lik.parsi=function(theta, phihat, sigmahat, Y, Distance, mu){
+  p <- length(phihat)
+  n <- length(Y)/p
+  d <- 2
+  D_B= theta[1]
+  r_B= diag(p)
+  r_B[r_B==0]=theta[2]
+  #r_V= diag(p)
+  #r_V[r_V==0]=theta[3]
+  r_V= (1-theta[2])*diag(p) + theta[2]*cor(Y.train)
+  phi.mat = diag(phihat)
+  ###Creating phi matrix
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      phi.mat[i,j]= sqrt((phi.mat[i,i]^2 + phi.mat[j,j]^2)/2) + D_B*(1-r_B[i,j])
+      phi.mat[j,i] = phi.mat[i,j]
+    }
+  }
+  nu.mat=matrix(nc=p,nr=p,0.5)
+  W = sqrt((sigmahat * phihat^(2*diag(nu.mat)))/(gamma(diag(nu.mat))))
+  ##Creating smoothness matrix
+  sigma.mat=diag(sigmahat)
+  
+  for(i in 1:(p-1)){
+    for (j in (i+1): p){
+      sigma.mat[i,j]= W[i]*W[j] * r_V[i,j] * phi.mat[i,j] ^(-(nu.mat[i,i] + nu.mat[j,j])) * gamma((nu.mat[i,i] + nu.mat[j,j])/2 + d/2) * gamma(nu.mat[i,j]) * 1/(gamma(nu.mat[i,j] + d/2)) 
+      sigma.mat[j,i] = sigma.mat[i,j]
+    }
+  }
+  
+  SIGMA <- matrix(ncol=n*p, nrow=n*p)
+  
+  for (i in 1:p){
+    for(j in i:p){
+      idx=c(((i-1)*n+1):(i*n))
+      jdx=c(((j-1)*n+1):(j*n))
+      
+      SIGMA[idx,jdx] = sigma.mat[i,j]*geoR::matern(Distance,phi= 1/phi.mat[i,j], kappa= nu.mat[i,j])
+      SIGMA[jdx,idx] = SIGMA[idx,jdx]
+    }
+  }
+  #SIGMA <- SIGMA.create(theta,phihat, sigmahat,Distance,Y)
+  Y <- as.matrix(Y)
+  mu0 <- rep(mu,each=n)
+  S_Y = (Y-mu0) %*% t(Y-mu0)
+  K <- solve(SIGMA)
+  #loglik <- -ellK(S=S_Y,K=K,n=1)
+  loglik <- ifelse(is.positive.semi.definite(SIGMA),-log(dmvnorm(Y[,1],mean=mu0,sigma=SIGMA)),1000)
+  return(loglik)
+}
+
+
+mu.est <- c(M[[1]]$Beta,M[[2]]$Beta,M[[3]]$Beta)
+
+S <- Sys.time()
+opt <- optim(par=c(0,0.3,0.1,0.2,0.3),lik,phihat=diag(phihat.mat),sigmahat=diag(sigmahat.mat),Y=as.numeric(Y.train),Dist=as.matrix(dist(coords.train)),mu=mu.est, method="BFGS",control = list(trace=1)) 
+opt.parsi <- optim(par=c(0,0.3,0.1),lik.parsi,phihat=diag(phihat.mat),sigmahat=diag(sigmahat.mat),Y=as.numeric(Y.train),Dist=as.matrix(dist(coords.train)),mu=mu.est, method="BFGS",control = list(trace=1)) 
+
+t <- Sys.time()-S
+
+
+model.apag= SIGMA.create(theta=opt$par,phihat =diag(phihat.mat),sigmahat=diag(sigmahat.mat),Y=as.numeric(Y.train),Dist=as.matrix(dist(coords.train)))
+model.apag.parsi=SIGMA.create(theta=c(opt.parsi$par[1:2],rep(opt.parsi$par[3],3)),phihat =diag(phihat.mat),sigmahat=diag(sigmahat.mat),Y=as.numeric(Y.train),Dist=as.matrix(dist(coords.train)))
+
 colnames(SIGMA) <- c(1:(n*p))
 rownames(SIGMA) <- c(1:(n*p))
-
 
 ##taking an initial rho to get initial Sigma
 
@@ -226,6 +398,8 @@ pseudo.est <- function(rho,...){
       }
     }
     
+    SIGMAhat <- SIGMAhat[-exc,-exc]
+    A <- A[-exc,-exc]
     
     #finding maximal cliques
     cgens <- maxClique(as(A,"graphNEL"))$maxCliques
@@ -243,17 +417,28 @@ pseudo.est <- function(rho,...){
     Rhat <- solve(carcfit2$K)
     return(list(fit=carcfit2,lik=carcfit2$logLtest,sigma=Rhat))
   } else{
-    return(list(fit=NULL,lik=NULL,sigma=NULL))
+    return(list(fit=NULL,lik=-10000,sigma=NULL))
   }
 }
 
-results <- pseudo.est(setting$rho[id],eps=10^(-3), Y=as.numeric(Y.data))
+
+#### Using optim for our rho
+#opt.us <- optim(par=0.7,function(x){-pseudo.est(x,eps=10^(-3), Y=as.numeric(Y.data), mu=rep(mu.est,each=nrow(Y.data)))$lik},method="BFGS",control = list(trace=1)) 
+
+
+
+results <- pseudo.est(setting$rho[id],eps=10^(-3), Y=as.numeric(Y.data), mu=rep(mu.est,each=nrow(Y.data)))
 results$truephi <- phi.mat
 results$truesig <- sigma.mat
+results$estphi <- diag(phihat.mat)
+results$estsig <- diag(sigmahat.mat)
+
+model.apag$mu=mu.est
+model.apag.parsi$mu=mu.est
+
 
 if(!is.null(results$fit)){
-model1 <- list(phihat=phihat.mat,sigmahat=sigmahat.mat,sigma=results$sigma[-exc,-exc])
-
+model1 <- list(phihat=phihat.mat,sigmahat=sigmahat.mat,sigma=results$sigma,mu=mu.est)
 pred.matern <- function(loc=c(0,1),var=2, model=model1,train=list(coords=coords.train,Y=as.numeric(Y.train)), n.var=p){
   d <- apply(train$coords,1,function(x){dist(rbind(loc,x))})
   cov.sp <- model$sigmahat[var,var]*geoR::matern(d,phi= 1/model$phihat[var,var], kappa= 0.5)
@@ -267,30 +452,57 @@ pred.matern <- function(loc=c(0,1),var=2, model=model1,train=list(coords=coords.
   
   
   cond.sigma <- t(as.matrix(cov.sp)) %*% solve(sigma.var)
-  pred <- mean(Y.var) + as.matrix(cond.sigma) %*% (Y.var-rep(mean(Y.var),n))
+  pred <- model$mu[var] + as.matrix(cond.sigma) %*% (Y.var-rep(model$mu[var],n))
+  return(as.numeric(pred))
+}
+
+pred.apag <- function(loc=c(0,1),var=2, model=model1,train=list(coords=coords.train,Y=as.numeric(Y.train)), n.var=p){
+  d <- apply(train$coords,1,function(x){dist(rbind(loc,x))})
+  n <- ncol(model$sigma)/n.var
+  p <- n.var
+  
+  cov.sp <- numeric(length(train$Y))
+  for(i in 1:length(train$Y)){
+    cov.sp[i] = model$sigmahat[var,ceiling(i/n)] * geoR::matern(d[ifelse(i %% n==0,200,i %% n)],phi= 1/model$phihat[var,ceiling(i/n)], kappa= 0.5)
+  }
+  
+  sigma.var <- model$sigma
+  Y.var <- train$Y
+  
+  cond.sigma <- t(as.matrix(cov.sp)) %*% solve(sigma.var)
+  pred <- model$mu[var] + as.matrix(cond.sigma) %*% (Y.var-rep(model$mu,each=n))
   return(as.numeric(pred))
 }
 
 
 Y.pred <- matrix(ncol=ncol(Y.test),nrow=nrow(Y.test))
+Y.pred.apag <- Y.pred
 
 for(j in 1:nrow(coords.test)){
-  
   Y.pred[j,] = unlist(lapply(c(1:3),function(x){pred.matern(loc=coords.test[j,],var=x)}))
+  Y.pred.apag[j,]=unlist(lapply(c(1:3),function(x){pred.apag(loc=coords.test[j,],var=x,model=model.apag)}))
 }
 
+
 results$pred.mse <- mean((Y.test-Y.pred)^2, na.rm=TRUE)
+results$pred.mse.apag <- mean((Y.test-Y.pred.apag)^2, na.rm=TRUE)
 } else { 
   results$pred.mse <- NULL
   }
 
 results$rho <- setting$rho[id]
-results$philim <- c(setting$phi.lo[id],setting$phi.hi[id])
+#results$philim <- c(setting$phi.lo[id],setting$phi.hi[id])
 results$test <- Y.test
 results$pred <- Y.pred
+elapsed <- Sys.time() - T0
+units(elapsed) <- "secs"
+results$elapsed <- elapsed
+
+
+
 
 ## phi directory create
-dir.path <- file.path("Results", paste0("run-phi_(",setting$phi.lo[id],",",setting$phi.hi[id],")"))
+dir.path <- file.path("Results", paste0("run-set_(",setting$sigma.phi[id],")"))
 dir.create(dir.path,showWarnings = FALSE)
 
 ##rho directory create

@@ -1,0 +1,204 @@
+---
+title: "Result_141118"
+author: "Debangan Dey"
+date: "11/13/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+M=2
+N=100
+sett <- paste0("run-set_(",M,"_",N,")")
+setwd(paste0("Code/Results_notourmod/",sett))
+
+L <- list.files()
+df <- list()
+
+for(i in 1:length(L)){
+  df[[i]] <- readRDS(L[i])
+}
+
+apag.corr <- matrix(nrow=length(df),ncol=3)
+apag.mse <- numeric(length(df))
+apag.parsi.corr <- matrix(nrow=length(df),ncol=3)
+apag.parsi.mse <- numeric(length(df))
+true.corr <- apag.corr
+
+for(i in 1:length(df)){
+  apag.corr[i,]=df[[i]]$apag$corr[upper.tri(df[[i]]$apag$corr)]
+  apag.mse[i]=df[[i]]$apag$mse
+  apag.parsi.corr[i,]=df[[i]]$apag.parsi$corr[upper.tri(df[[i]]$apag.parsi$corr)]
+  apag.parsi.mse[i]=df[[i]]$apag.parsi$mse
+  true.corr[i,] <- df[[i]]$true$corr[upper.tri(df[[i]]$true$corr)]
+}
+
+df.old <- df
+setwd(paste0("../../Results/",sett))
+L <- list.files()
+df <- list()
+
+for(i in 1:50){
+  df[[i]] <- list()
+  for(j in 1:length(list.files(L[i]))){
+    file.path <- paste0(L[i],"/",list.files(L[i])[j])
+    r <- regexec("seed_(.+)rds",list.files(L[i])[j])
+    m <- regmatches(list.files(L[i])[j],r)[[1]][2]
+    j1 <- as.numeric(gsub("\\.","",m))/2
+    df[[i]][[j1]] <- readRDS(file.path)
+  }
+}
+
+
+setwd("../../..")
+
+mse <- matrix(ncol=length(df),nrow=50)
+lik <- mse
+elapsed <- mse
+sigmahat <- array(dim=c(50,50,3))
+corrhat <- array(dim=c(50,50,3))
+phihat <- sigmahat
+muhat <-  array(dim=c(50,50,3))
+
+for(k in 1:nrow(mse)){
+  for(l in 1:ncol(mse)){
+    ind <- as.numeric(tryCatch(is.null(df[[k]][[l]]),error=function(e) 100))
+    if(ind==1){
+      mse[l,k] <- NA
+      lik[l,k] <- NA
+    } else {
+      mse[l,k] <- tryCatch(df[[k]][[l]]$ourmod$mse,error=function(e) NA)
+      lik[l,k] <- tryCatch(df[[k]][[l]]$ourmod$lik,error=function(e) NA)
+      sigmahat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$sigma), error= function(e) NA)
+      phihat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$phi), error= function(e) NA)
+      corrhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$corr[upper.tri(df[[k]][[l]]$ourmod$corr)], error= function(e) NA)
+      muhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$mu, error= function(e) NA)
+  }
+  }
+}
+
+colMeans(sigmahat[,1,])
+colMeans(phihat[,1,])
+colMeans(sigmahat[,1,] * phihat[,1,])
+colMeans(muhat[,1,])
+
+
+max.ind=apply(lik,1,function(x){ifelse(sum(!is.na(x)) > 5,which(x==max(x,na.rm = TRUE)),100)})
+ourmod.corr=matrix(ncol=3,nrow=length(max.ind))
+ourmod.mse=numeric(length(max.ind))
+
+for(i in 1:length(max.ind)){
+  ourmod.corr[i,] = tryCatch(corrhat[i,max.ind[i],],error=function(e) NA)
+  ourmod.mse[i] =tryCatch( mse[i,max.ind[i]], error=function(e) NA)
+}
+
+R <- data.frame(truemod=c(colMeans(true.corr),0),apag=c(colMeans(apag.corr),mean(apag.mse)),apag.sd=c(apply(apag.corr,2,sd),sd(apag.mse)), 
+                apag.parsi=c(colMeans(apag.parsi.corr),mean(apag.parsi.mse)),apag.parsi.sd=c(apply(apag.parsi.corr,2,sd),sd(apag.parsi.mse)),
+                ourmod=c(colMeans(ourmod.corr, na.rm = TRUE),mean(ourmod.mse, na.rm=TRUE)),ourmod.sd=c(apply(ourmod.corr,2,function(x){sd(x, na.rm = TRUE)}),sd(ourmod.mse, na.rm = TRUE)))
+
+rownames(R) <- c("Corr_12","Corr_13","Corr_23","MSE")
+
+R
+
+```
+
+```{r}
+######### 
+M=2
+N=250
+sett <- paste0("run-set_(",M,"_",N,")")
+setwd(paste0("Code/Results_notourmod/",sett))
+
+L <- list.files()
+df <- list()
+
+for(i in 1:length(L)){
+  df[[i]] <- readRDS(L[i])
+}
+
+
+apag.corr <- matrix(nrow=length(df),ncol=3)
+apag.mse <- numeric(length(df))
+apag.parsi.corr <- matrix(nrow=length(df),ncol=3)
+apag.parsi.mse <- numeric(length(df))
+true.corr <- apag.corr
+
+for(i in 1:length(df)){
+  apag.corr[i,]=df[[i]]$apag$corr[upper.tri(df[[i]]$apag$corr)]
+  apag.mse[i]=df[[i]]$apag$mse
+  apag.parsi.corr[i,]=df[[i]]$apag.parsi$corr[upper.tri(df[[i]]$apag.parsi$corr)]
+  apag.parsi.mse[i]=df[[i]]$apag.parsi$mse
+  true.corr[i,] <- df[[i]]$true$corr[upper.tri(df[[i]]$true$corr)]
+}
+
+
+setwd(paste0("../../Results/",sett))
+L <- list.files()
+df <- list()
+
+for(i in 1:50){
+  df[[i]] <- list()
+  for(j in 1:length(list.files(L[i]))){
+    file.path <- paste0(L[i],"/",list.files(L[i])[j])
+    r <- regexec("seed_(.+)rds",list.files(L[i])[j])
+    m <- regmatches(list.files(L[i])[j],r)[[1]][2]
+    j1 <- as.numeric(gsub("\\.","",m))/2
+    df[[i]][[j1]] <- readRDS(file.path)
+  }
+}
+
+
+setwd("../../..")
+
+mse <- matrix(ncol=length(df),nrow=50)
+lik <- mse
+elapsed <- mse
+sigmahat <- array(dim=c(50,50,3))
+corrhat <- array(dim=c(50,50,3))
+phihat <- sigmahat
+muhat <-  array(dim=c(50,50,3))
+
+for(k in 1:nrow(mse)){
+  for(l in 1:ncol(mse)){
+    ind <- as.numeric(tryCatch(is.null(df[[k]][[l]]),error=function(e) 100))
+    if(ind==1){
+      mse[l,k] <- NA
+      lik[l,k] <- NA
+    } else {
+      mse[l,k] <- tryCatch(df[[k]][[l]]$ourmod$mse,error=function(e) NA)
+      lik[l,k] <- tryCatch(df[[k]][[l]]$ourmod$lik,error=function(e) NA)
+      sigmahat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$sigma), error= function(e) NA)
+      phihat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$phi), error= function(e) NA)
+      corrhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$corr[upper.tri(df[[k]][[l]]$ourmod$corr)], error= function(e) NA)
+      muhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$mu, error= function(e) NA)
+  }
+  }
+}
+
+colMeans(sigmahat[,1,],na.rm = TRUE)
+colMeans(phihat[,1,],na.rm = TRUE)
+colMeans(sigmahat[,1,] * phihat[,1,],na.rm = TRUE)
+colMeans(muhat[,1,],na.rm = TRUE)
+
+
+max.ind=apply(lik,1,function(x){ifelse(sum(!is.na(x)) > 5,which(x==max(x,na.rm = TRUE)),100)})
+ourmod.corr=matrix(ncol=3,nrow=length(max.ind))
+ourmod.mse=numeric(length(max.ind))
+
+for(i in 1:length(max.ind)){
+  ourmod.corr[i,] = tryCatch(corrhat[i,max.ind[i],],error=function(e) NA)
+  ourmod.mse[i] =tryCatch( mse[i,max.ind[i]], error=function(e) NA)
+}
+
+R <- data.frame(truemod=c(colMeans(true.corr),0),apag=c(colMeans(apag.corr),mean(apag.mse)),apag.sd=c(apply(apag.corr,2,sd),sd(apag.mse)), 
+                apag.parsi=c(colMeans(apag.parsi.corr),mean(apag.parsi.mse)),apag.parsi.sd=c(apply(apag.parsi.corr,2,sd),sd(apag.parsi.mse)),
+                ourmod=c(colMeans(ourmod.corr, na.rm = TRUE),mean(ourmod.mse, na.rm=TRUE)),ourmod.sd=c(apply(ourmod.corr,2,function(x){sd(x, na.rm = TRUE)}),sd(ourmod.mse, na.rm = TRUE)))
+
+rownames(R) <- c("Corr_12","Corr_13","Corr_23","MSE")
+
+R
+```

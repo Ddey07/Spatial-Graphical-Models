@@ -1,0 +1,96 @@
+---
+title: "Settings_2"
+author: "Debangan Dey"
+date: "11/6/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(tidyverse)
+```
+
+### phi = (1,1,1)
+### sig = (3,3,3)
+
+```{r}
+getwd()
+```
+
+```{r cars}
+setwd("../Data")
+##Once in the results directory
+L <- list.files()
+L
+
+df <- list()
+
+for(i in 1:50){
+  df[[i]] <- list()
+  for(j in 1:length(list.files(L[i]))){
+  file.path <- paste0(L[i],"/",list.files(L[i])[j])
+  r <- regexec("seed_(.+)rds",list.files(L[i])[j])
+  m <- regmatches(list.files(L[i])[j],r)[[1]][2]
+  j1 <- as.numeric(gsub("\\.","",m))/2
+  df[[i]][[j1]] <- readRDS(file.path)
+  }
+}
+
+
+f <- function(x,i,j){
+  if(is.null(x[[i]][[j]])){
+    NA
+  } else {
+    x[[i]][[j]]
+  }
+}
+
+
+#Log likelihood, mse, sigmahat, phihat store
+mse <- matrix(ncol=length(df),nrow=50)
+lik <- mse
+elapsed <- mse
+sigmahat <- array(dim=c(50,50,3))
+phihat <- sigmahat
+
+for(k in 1:nrow(mse)){
+  for(l in 1:ncol(mse)){
+    ind <- as.numeric(tryCatch(is.null(df[[k]][[l]]),error=function(e) 100))
+if(ind==1){
+  mse[l,k] <- NA
+  lik[l,k] <- NA
+} else {
+mse[l,k] <- tryCatch(df[[k]][[l]]$pred.mse,error=function(e) NA)
+lik[l,k] <- tryCatch(df[[k]][[l]]$lik,error=function(e) NA)
+sigmahat[l,k,] <- tryCatch(df[[k]][[l]]$estsig, error= function(e) NA)
+phihat[l,k,] <- tryCatch(df[[k]][[l]]$estphi, error= function(e) NA)
+elapsed[l,k] <- tryCatch(df[[k]][[l]]$elapsed/60,error=function(e) NA)
+  }
+  }
+}
+
+##Finding maximum likelihood rhos
+hist(seq(0,1,len=50)[apply(lik,1,function(x){which(x==max(x,na.rm = TRUE))})], xlab="rho", main="Histogram of maximizing rho")
+hist(elapsed[1,],xlab="Time in minutes")
+plot(seq(0,1,len=50),elapsed[1,],xlab="rho",ylab="Time in minutes",ty="b")
+
+##plotting one test vs train
+plot(df[[1]][[2]]$test[,1],df[[1]][[2]]$pred[,1])
+plot(df[[1]][[2]]$test[,2],df[[1]][[2]]$pred[,2])
+plot(df[[1]][[2]]$test[,3],df[[1]][[2]]$pred[,3])
+
+
+###MSE histogram
+hist(colMeans(mse, na.rm = TRUE))
+
+
+###averageing estimates over seeds
+colMeans(sigmahat[,1,])
+colMeans(phihat[,1,])
+colMeans(sigmahat[,1,] * phihat[,1,])
+
+
+```
+
+

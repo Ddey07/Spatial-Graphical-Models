@@ -3,60 +3,170 @@ rm(list=ls())
 library(tidyverse)
 
 
-setwd("Code/Results/Results")
-df <- list.files() %>%
-  purrr::map(readRDS)
+### phi = (1,3,5)
+### sig = (1,3,5)
 
+##Once in the results directory
+L <- list.files()
 
-f <- function(x,i){
-  if(is.null(x[[i]])){
-    NA
-  } else {
-    x[[i]]
+df <- list()
+
+for(i in 1:50){
+  df[[i]] <- list()
+  for(j in 1:length(list.files(L[i]))){
+  file.path <- paste0(L[i],"/",list.files(L[i])[j])
+  r <- regexec("seed_(.+)rds",list.files(L[i])[j])
+  m <- regmatches(list.files(L[i])[j],r)[[1]][2]
+  j1 <- as.numeric(gsub("\\.","",m))/2
+  df[[i]][[j1]] <- readRDS(file.path)
   }
 }
 
 
-#Log likelihood plot
-lik <- sapply(df,function(x){f(x,2)})
-plot(seq(0,1,length=length(list.files())),lik)
-
-SIGMA <- df[[1]]$truesigma
-
-lik.max=which(lik==max(lik,na.rm = TRUE))
-modelhat <- df[[lik.max]]
-SIGMAhat <- modelhat$sigma
-
-cov2cor(SIGMA)[c(1,201,401),c(1,201,401)]
-cov2cor(SIGMAhat)[c(1,201,401),c(1,201,401)]
-
-##load train test data
-load("../../all.RData")
-
-pred.matern <- function(loc=c(0,1),var=2, model=modelhat,train=Y[10,], n.var=3){
-  d <- apply(coords,1,function(x){dist(rbind(loc,x))})
-  cov.sp <- modelhat$sigmahat[var,var]*matern(d,phi= 1/modelhat$phihat[var,var], kappa= 0.5)
-  
-  
-  n <- ncol(model$sigma)/n.var
-  p <- n.var
-  sigma.var <- modelhat$sigma[(n*(var-1)+1):(n*var),(n*(var-1)+1):(n*var)]
-  
-  Y.var <- train[(n*(var-1)+1):(n*var)]
-  
-  
-  cond.sigma <- cov.sp %*% solve(sigma.var)
-  pred <- mean(Y.var) + cond.sigma %*% (Y.var-rep(mean(Y.var),n))
-  return(as.numeric(pred))
+f <- function(x,i,j){
+  if(is.null(x[[i]][[j]])){
+    NA
+  } else {
+    x[[i]][[j]]
+  }
 }
 
 
-Y.pred <- matrix(ncol=length(Y.test)/n.test,nrow=n.test)
+#Log likelihood, mse, sigmahat, phihat store
+mse <- matrix(ncol=length(df),nrow=50)
+lik <- mse
+sigmahat <- array(dim=c(50,50,3))
+phihat <- sigmahat
 
-for(i in 1:nrow(coords.test)){
-  
-  Y.pred[i,] = unlist(lapply(c(1:3),function(x){pred.matern(loc=coords.test[i,],var=x)}))
+for(k in 1:nrow(mse)){
+  for(l in 1:ncol(mse)){
+    ind <- as.numeric(tryCatch(is.null(df[[k]][[l]]),error=function(e) 100))
+if(ind==1){
+  mse[l,k] <- NA
+  lik[l,k] <- NA
+} else {
+mse[l,k] <- tryCatch(df[[k]][[l]]$pred.mse,error=function(e) NA)
+lik[l,k] <- tryCatch(df[[k]][[l]]$lik,error=function(e) NA)
+sigmahat[l,k,] <- tryCatch(df[[k]][[l]]$estsig, error= function(e) NA)
+phihat[l,k,] <- tryCatch(df[[k]][[l]]$estphi, error= function(e) NA)
+  }
+  }
 }
+
+##Finding maximum likelihood rhos
+hist(apply(lik,1,function(x){which(x==max(x,na.rm = TRUE))}))
+
+
+##plotting one test vs train
+plot(df[[1]][[2]]$test[,1],df[[1]][[2]]$pred[,1])
+plot(df[[1]][[2]]$test[,2],df[[1]][[2]]$pred[,2])
+plot(df[[1]][[2]]$test[,3],df[[1]][[2]]$pred[,3])
+
+
+###MSE histogram
+hist(colMeans(mse, na.rm = TRUE))
+
+
+###averageing estimates over seeds
+colMeans(sigmahat[,1,])
+colMeans(phihat[,1,])
+colMeans(sigmahat[,1,] * phihat[,1,])
+
+######## Other models #########
+M=2
+N=100
+sett <- paste0("run-set_(",M,"_",N,")")
+setwd(paste0("Code/Results_notourmod/",sett))
+
+L <- list.files()
+df <- list()
+
+for(i in 1:length(L)){
+  df[[i]] <- readRDS(L[i])
+}
+
+
+apag.corr <- matrix(nrow=length(df),ncol=3)
+apag.mse <- numeric(length(df))
+apag.parsi.corr <- matrix(nrow=length(df),ncol=3)
+apag.parsi.mse <- numeric(length(df))
+true.corr <- apag.corr
+
+for(i in 1:length(df)){
+  apag.corr[i,]=df[[i]]$apag$corr[upper.tri(df[[i]]$apag$corr)]
+  apag.mse[i]=df[[i]]$apag$mse
+  apag.parsi.corr[i,]=df[[i]]$apag.parsi$corr[upper.tri(df[[i]]$apag.parsi$corr)]
+  apag.parsi.mse[i]=df[[i]]$apag.parsi$mse
+  true.corr[i,] <- df[[i]]$true$corr[upper.tri(df[[i]]$true$corr)]
+}
+
+
+setwd("../../Results/run-set_(2_100)")
+L <- list.files()
+df <- list()
+
+for(i in 1:50){
+  df[[i]] <- list()
+  for(j in 1:length(list.files(L[i]))){
+    file.path <- paste0(L[i],"/",list.files(L[i])[j])
+    r <- regexec("seed_(.+)rds",list.files(L[i])[j])
+    m <- regmatches(list.files(L[i])[j],r)[[1]][2]
+    j1 <- as.numeric(gsub("\\.","",m))/2
+    df[[i]][[j1]] <- readRDS(file.path)
+  }
+}
+
+
+setwd("../../..")
+
+mse <- matrix(ncol=length(df),nrow=50)
+lik <- mse
+elapsed <- mse
+sigmahat <- array(dim=c(50,50,3))
+corrhat <- array(dim=c(50,50,3))
+phihat <- sigmahat
+muhat <-  array(dim=c(50,50,3))
+
+for(k in 1:nrow(mse)){
+  for(l in 1:ncol(mse)){
+    ind <- as.numeric(tryCatch(is.null(df[[k]][[l]]),error=function(e) 100))
+    if(ind==1){
+      mse[l,k] <- NA
+      lik[l,k] <- NA
+    } else {
+      mse[l,k] <- tryCatch(df[[k]][[l]]$ourmod$mse,error=function(e) NA)
+      lik[l,k] <- tryCatch(df[[k]][[l]]$ourmod$lik,error=function(e) NA)
+      sigmahat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$sigma), error= function(e) NA)
+      phihat[l,k,] <- tryCatch(diag(df[[k]][[l]]$ourmod$phi), error= function(e) NA)
+      corrhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$corr[upper.tri(df[[k]][[l]]$ourmod$corr)], error= function(e) NA)
+      muhat[l,k,] <- tryCatch(df[[k]][[l]]$ourmod$mu, error= function(e) NA)
+  }
+  }
+}
+
+colMeans(sigmahat[,1,])
+colMeans(phihat[,1,])
+colMeans(sigmahat[,1,] * phihat[,1,])
+colMeans(muhat[,1,])
+
+
+max.ind=apply(lik,1,function(x){which(x==max(x,na.rm = TRUE))})
+ourmod.corr=matrix(ncol=3,nrow=length(max.ind))
+ourmod.mse=numeric(length(max.ind))
+
+for(i in 1:length(max.ind)){
+  ourmod.corr[i,] = corrhat[i,max.ind[i],]
+  ourmod.mse[i] = mse[i,max.ind[i]]
+}
+
+R <- data.frame(truemod=c(colMeans(true.corr),0),apag=c(colMeans(apag.corr),mean(apag.mse)),apag.sd=c(apply(apag.corr,2,sd),sd(apag.mse)), 
+                apag.parsi=c(colMeans(apag.parsi.corr),mean(apag.parsi.mse)),apag.parsi.sd=c(apply(apag.parsi.corr,2,sd),sd(apag.parsi.mse)),
+                ourmod=c(colMeans(ourmod.corr),mean(ourmod.mse)),ourmod.sd=c(apply(ourmod.corr,2,sd),sd(ourmod.mse)))
+
+rownames(R) <- c("Corr_12","Corr_13","Corr_23","MSE")
+
+R
+
 
 
 
